@@ -1,118 +1,178 @@
-from dataclasses import dataclass
 import json
 import os
-import time
+from dataclasses import dataclass
+from typing import Dict, List
+
 import requests
 from dotenv import load_dotenv
-from typing import Iterator
+
+from .personas import get_persona_profile
+
+load_dotenv()
+
 
 @dataclass
 class DebateConfig:
     rounds: int = 3
     word_limit: int = 100
     judge_limit: int = 150
-    retry_delay: int = 2
-    rate_limit_delay: float = 1.0
-    max_retries: int = 3
+    topic_domain: str = "General"
+
 
 class DebateEngine:
-    def __init__(self, api_key, api_url, model_1, model_2, model_judge, cfg: DebateConfig):
+    def __init__(self, api_key: str, api_url: str, model_for: str, model_against: str, model_judge: str, config: DebateConfig):
         self.api_key = api_key
         self.api_url = api_url
-        self.model_1 = model_1
-        self.model_2 = model_2
+        self.model_for = model_for
+        self.model_against = model_against
         self.model_judge = model_judge
-        self.cfg = cfg
-        self.last_request = 0.0
+        self.config = config
 
     @classmethod
-    def from_env(cls, cfg: DebateConfig):
-        load_dotenv()
+    def from_env(cls, config: DebateConfig):
         return cls(
             api_key=os.getenv("OPENROUTER_API_KEY", ""),
             api_url=os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions"),
-            model_1=os.getenv("OPENROUTER_MODEL_DEBATER_1", "nvidia/nemotron-3-nano-30b-a3b:free"),
-            model_2=os.getenv("OPENROUTER_MODEL_DEBATER_2", "nvidia/nemotron-3-super-120b-a12b:free"),
+            model_for=os.getenv("OPENROUTER_MODEL_DEBATER_1", "nvidia/nemotron-3-nano-30b-a3b:free"),
+            model_against=os.getenv("OPENROUTER_MODEL_DEBATER_2", "nvidia/nemotron-3-super-120b-a12b:free"),
             model_judge=os.getenv("OPENROUTER_MODEL_JUDGE", "moonshotai/kimi-k2.6:free"),
-            cfg=cfg,
+            config=config,
         )
 
-    def _rate_limit(self):
-        elapsed = time.time() - self.last_request
-        if elapsed < self.cfg.rate_limit_delay:
-            time.sleep(self.cfg.rate_limit_delay - elapsed)
-
-    def _stream(self, model: str, prompt: str) -> Iterator[str]:
-        """Stream tokens from OpenRouter via SSE. Yields string chunks."""
-        self._rate_limit()
-        headers = {
+    def _headers(self):
+        return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "Accept": "text/event-stream",
         }
+
+    def _stream_chat(self, model: str, system_prompt: str, user_prompt: str):
         payload = {
             "model": model,
             "stream": True,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
         }
-        for attempt in range(self.cfg.max_retries + 1):
+        resp = requests.post(self.api_url, headers=self._headers(), json=payload, stream=True, timeout=120)
+        resp.raise_for_status()
+        for line in resp.iter_lines(decode_unicode=True):
+            if not line or not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data.strip() == "[DONE]":
+                break
             try:
-                with requests.post(
-                    self.api_url, headers=headers, json=payload,
-                    stream=True, timeout=60
-                ) as r:
-                    self.last_request = time.time()
-                    if r.status_code != 200:
-                        time.sleep(self.cfg.retry_delay * (attempt + 1))
-                        continue
-                    for raw_line in r.iter_lines():
-                        if not raw_line:
-                            continue
-                        line = raw_line.decode("utf-8")
-                        if line.startswith(":"):
-                            # SSE comment — keepalive, skip
-                            continue
-                        if line.startswith("data: "):
-                            data = line[len("data: "):]
-                            if data.strip() == "[DONE]":
-                                return
-                            try:
-                                chunk = json.loads(data)
-                                delta = chunk["choices"][0]["delta"].get("content", "")
-                                if delta:
-                                    yield delta
-                            except (json.JSONDecodeError, KeyError, IndexError):
-                                continue
-                    return
-            except requests.RequestException:
-                time.sleep(self.cfg.retry_delay * (attempt + 1))
+                obj = json.loads(data)
+                delta = obj.get("choices", [{}])[0].get("delta", {}).get("content")
+                if delta:
+                    yield delta
+            except json.JSONDecodeError:
+                continue
 
-    def _collect(self, model: str, prompt: str) -> str:
-        """Collect full text from a streaming call (non-UI path)."""
-        return "".join(self._stream(model, prompt))
+    def _nonstream_text(self, model: str, system_prompt: str, user_prompt: str) -> str:
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        resp = requests.post(self.api_url, headers=self._headers(), json=payload, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["choices"][0]["message"]["content"].strip()
 
-    def generate_for_argument(self, topic: str, p1: str) -> Iterator[str]:
-        prompt = (
-            f"You are {p1}. Do not mention your own name anywhere in your response.\n\n"
-            f"Debate topic: {topic}\n"
-            f"You are arguing FOR this topic. Write a concise argument in under {self.cfg.word_limit} words."
-        )
-        return self._stream(self.model_1, prompt)
+    def _speaker_prompt(self, speaker: str, side: str) -> str:
+        profile = get_persona_profile(speaker)
+        expertise = ", ".join(profile.get("expertise", [])) or "general reasoning"
+        style = profile.get("style", "balanced")
+        return f"""
+You are {speaker}, arguing {side} in a debate.
+Selected domain: {self.config.topic_domain}.
+Expertise: {expertise}.
+Style: {style}.
 
-    def generate_against_argument(self, topic: str, p2: str, previous: str) -> Iterator[str]:
-        prompt = (
-            f"You are {p2}. Do not mention your own name anywhere in your response.\n\n"
-            f"Debate topic: {topic}\n"
-            f"You are arguing AGAINST. The FOR argument was:\n{previous}\n\n"
-            f"Write a concise counter-argument in under {self.cfg.word_limit} words."
-        )
-        return self._stream(self.model_2, prompt)
+Rules:
+- Stay strictly within the selected domain.
+- Do not mention your own name in the argument.
+- Do not claim expertise outside your assigned domain.
+- Be concise, persuasive, and direct.
+- Keep the response under {self.config.word_limit} words.
+""".strip()
 
-    def generate_verdict(self, topic: str, pj: str, transcript: list) -> Iterator[str]:
-        prompt = (
-            f"You are {pj}. Do not mention your own name anywhere in your response.\n\n"
-            f"Debate topic: {topic}\n\nTranscript:\n{json.dumps(transcript, indent=2)}\n\n"
-            f"Judge the debate in under {self.cfg.judge_limit} words. "
-            f"State which side was more convincing and why."
-        )
-        return self._stream(self.model_judge, prompt)
+    def _judge_prompt(self, judge: str) -> str:
+        profile = get_persona_profile(judge)
+        expertise = ", ".join(profile.get("expertise", [])) or "balanced evaluation"
+        style = profile.get("style", "balanced")
+        return f"""
+You are {judge}, the judge of this debate.
+Selected domain: {self.config.topic_domain}.
+Expertise: {expertise}.
+Style: {style}.
+
+Rules:
+- Evaluate only within the selected domain.
+- Do not mention your own name.
+- Keep the verdict under {self.config.judge_limit} words.
+- Be balanced and decisive.
+""".strip()
+
+    def generate_for_argument(self, topic: str, speaker: str):
+        system_prompt = self._speaker_prompt(speaker, "FOR")
+        user_prompt = f"""
+Topic domain: {self.config.topic_domain}
+Topic: {topic}
+
+Write a FOR argument for this topic.
+""".strip()
+        return self._stream_chat(self.model_for, system_prompt, user_prompt)
+
+    def generate_against_argument(self, topic: str, speaker: str, prior_argument: str):
+        system_prompt = self._speaker_prompt(speaker, "AGAINST")
+        user_prompt = f"""
+Topic domain: {self.config.topic_domain}
+Topic: {topic}
+
+Opponent argument:
+{prior_argument}
+
+Write a strong AGAINST response.
+""".strip()
+        return self._stream_chat(self.model_against, system_prompt, user_prompt)
+
+    def generate_verdict(self, topic: str, judge: str, transcript: List[Dict[str, str]]):
+        system_prompt = self._judge_prompt(judge)
+        debate_text = "\n\n".join(f"{item['speaker']} ({item['side']}): {item['text']}" for item in transcript)
+        user_prompt = f"""
+Topic domain: {self.config.topic_domain}
+Topic: {topic}
+
+Debate transcript:
+{debate_text}
+
+Deliver the verdict.
+""".strip()
+        return self._stream_chat(self.model_judge, system_prompt, user_prompt)
+    
+    def generate_topic(self, topic_domain: str, p1: str, p2: str) -> str:
+        profile1 = get_persona_profile(p1)
+        profile2 = get_persona_profile(p2)
+
+        system_prompt = f"""
+    You generate short, interesting debate topics.
+    Domain: {topic_domain}.
+    Keep it under 50 words.
+    Make it suitable for both selected debaters.
+    Return only the topic text.
+    """.strip()
+
+        user_prompt = f"""
+    Generate one debate topic under 50 words for a debate between:
+    - {p1} ({profile1.get('style', 'balanced')})
+    - {p2} ({profile2.get('style', 'balanced')})
+
+    Return only the topic text.
+    """.strip()
+
+        return self._nonstream_text(self.model_for, system_prompt, user_prompt)
