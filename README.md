@@ -139,8 +139,8 @@ Secrets and model config are separated from source code to support safe local de
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-username>/<your-repo-name>.git
-cd <your-repo-name>
+git clone https://github.com/rajatthai/multi-agent-debate-engine.git
+cd multi-agent-debate-engine
 ```
 
 ### 2. Create and activate a virtual environment
@@ -183,7 +183,7 @@ OPENROUTER_MODEL_JUDGE=moonshotai/kimi-k2.6:free
 streamlit run app.py
 ```
 
-## Deployment
+## Cloud Deployment (Optional)
 
 This project is deployed on Streamlit Community Cloud.
 
@@ -235,28 +235,10 @@ OPENROUTER_MODEL_JUDGE = "moonshotai/kimi-k2.6:free"
 
 ## Screenshots
 
-Add screenshots in an `assets/` folder and reference them here.
-
-Example:
-
 ```md
 ![Debate UI](assets/debate-ui.png)
 ![Judge Verdict](assets/judge-verdict.png)
 ```
-
-A short GIF demo is also strongly recommended for recruiter-facing presentation.
-
-## Resume / portfolio value
-
-This project demonstrates skills relevant to AI application engineering and modern software delivery:
-- LLM orchestration.
-- Streaming UX design.
-- Prompt engineering.
-- Python app structuring.
-- Config-driven deployment.
-- Public cloud app delivery with GitHub integration.
-
-It works especially well as a pinned GitHub project because it is easy to understand, visually interactive, and live on the web.
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
