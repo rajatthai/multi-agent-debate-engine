@@ -1,0 +1,29 @@
+{
+  "topic": "Should AI replace human decision-making in critical domains?",
+  "debater_for": "Plato",
+  "debater_against": "Kant",
+  "judge": "Aristotle",
+  "transcript": [
+    {
+      "speaker": "Plato",
+      "side": "FOR",
+      "text": "Reason perfected is reason untainted by emotion. An ideal form of governance, in the manner of the philosopher-king, can be approximated through rigorous, consistent algorithmic logic."
+    },
+    {
+      "speaker": "Kant",
+      "side": "AGAINST",
+      "text": "Morality demands that we treat persons as ends in themselves. A machine cannot exercise moral duty; it can only simulate it, stripping decisions of the dignity they require."
+    },
+    {
+      "speaker": "Plato",
+      "side": "FOR",
+      "text": "When human judges err through fatigue or prejudice, citizens suffer. A system oriented toward the Form of Justice corrects such errors systematically."
+    },
+    {
+      "speaker": "Kant",
+      "side": "AGAINST",
+      "text": "Justice without accountability is tyranny with better optics. Who do we hold responsible when an algorithm condemns an innocent person?"
+    }
+  ],
+  "verdict": "The argument against replacement was more compelling. The observation about accountability \u2014 that algorithmic decisions diffuse moral responsibility \u2014 is the decisive blow. Justice requires an agent who can be held responsible."
+}

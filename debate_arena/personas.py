@@ -1,0 +1,17 @@
+PERSONALITIES = [
+    "Plato",
+    "Aristotle",
+    "Immanuel Kant",
+    "Friedrich Nietzsche",
+    "Socrates",
+    "Jean-Paul Sartre",
+    "Adam Smith",
+    "Karl Marx",
+    "Albert Einstein",
+    "Marie Curie",
+    "Charles Darwin",
+    "Winston Churchill",
+    "Mahatma Gandhi",
+    "Eleanor Roosevelt",
+    "Nikola Tesla",
+]

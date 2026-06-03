@@ -1,0 +1,10 @@
+.env
+config.py
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+*.egg-info/
+dist/
+DEPLOYMENT_CHECKLIST.md
