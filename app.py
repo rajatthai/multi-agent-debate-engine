@@ -335,7 +335,8 @@ if run:
     st.markdown(f'<div class="topic-banner">📌 Domain: {topic_domain} | Topic: {topic}</div>', unsafe_allow_html=True)
 
     transcript = []
-    verdict_text = ""
+    judge_model = ""
+    verdict_text = ""    
 
     if sample_mode:
         def fake_stream(text, delay=0.012):
@@ -358,6 +359,7 @@ if run:
             t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine_preview.model_against, fake_stream(samples_against[i % len(samples_against)]), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
             transcript.append({"speaker": p2, "side": "AGAINST", "text": t2, "domain": topic_domain})
         judge_box = st.empty()
+        judge_model = engine_preview.model_judge
         verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine_preview.model_judge, fake_stream(f"After a closely contested debate, {p2} argued more persuasively. The case against full replacement centered on accountability and the risk of scaling historical bias, which proved more compelling."), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
     else:
@@ -375,13 +377,15 @@ if run:
             t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine.model_against, engine.generate_against_argument(topic, p2, t1), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
             transcript.append({"speaker": p2, "side": "AGAINST", "text": t2, "domain": topic_domain})
         judge_box = st.empty()
+        judge_model = engine.model_judge
         verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine.model_judge, engine.generate_verdict(topic, pj, transcript), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
 
     st.markdown('</div>', unsafe_allow_html=True)
+
     st.markdown(f"""
     <div class="verdict-box">
-      <div class="verdict-title">⚖️ Judge's Verdict — {pj}</div>
+      <div class="verdict-title">⚖️ Judge's Verdict · {pj} · {judge_model}</div>
       <div>{verdict_text}</div>
     </div>
     """, unsafe_allow_html=True)
