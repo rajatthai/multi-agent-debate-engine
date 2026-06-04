@@ -54,10 +54,21 @@ class DebateEngine:
                 {"role": "user", "content": user_prompt},
             ],
         }
-        resp = requests.post(self.api_url, headers=self._headers(), json=payload, stream=True, timeout=120)
+        resp = requests.post(
+            self.api_url,
+            headers=self._headers(),
+            json=payload,
+            stream=True,
+            timeout=120,
+        )
         resp.raise_for_status()
-        for line in resp.iter_lines(decode_unicode=True):
-            if not line or not line.startswith("data: "):
+
+        # Force UTF-8 decoding at the source to avoid mojibake characters in the output
+        for raw_line in resp.iter_lines(decode_unicode=False):
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8")   # explicit UTF-8, no guessing
+            if not line.startswith("data: "):
                 continue
             data = line[6:]
             if data.strip() == "[DONE]":
@@ -78,8 +89,14 @@ class DebateEngine:
                 {"role": "user", "content": user_prompt},
             ],
         }
-        resp = requests.post(self.api_url, headers=self._headers(), json=payload, timeout=120)
+        resp = requests.post(
+            self.api_url,
+            headers=self._headers(),
+            json=payload,
+            timeout=120,
+        )
         resp.raise_for_status()
+        resp.encoding = "utf-8"   # force UTF-8 before .json() parses it
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
 

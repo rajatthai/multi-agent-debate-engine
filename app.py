@@ -3,9 +3,34 @@ import time
 import uuid
 import queue
 import threading
+import random
 import streamlit as st
 from debate_arena.engine import DebateEngine, DebateConfig
 from debate_arena.personas import PERSONA_GROUPS, get_personas_for_group
+
+TOPIC_BANK = {
+    "Philosophy": [
+        "Can moral responsibility survive if human decisions are increasingly delegated to machines?",
+        "Is truth more important than social harmony in public discourse?",
+    ],
+    "Politics": [
+        "Is strong executive leadership more effective than broad consensus in a crisis?",
+        "Should social media platforms have stricter rules for political speech?",
+    ],
+    "Economics": [
+        "Should governments prioritize growth or inequality reduction during downturns?",
+        "Is free-market competition enough to drive innovation without regulation?",
+    ],
+    "Technology": [
+        "Should AI systems be allowed to make high-stakes decisions without human oversight?",
+        "Is open-source software better than proprietary software for long-term innovation?",
+    ],
+    "Science": [
+        "Should scientific research prioritize practical impact over theoretical discovery?",
+        "Is it ever acceptable to slow innovation in science for safety reasons?",
+    ],
+}
+
 
 st.set_page_config(page_title="LLM Debate Arena", page_icon="🎭", layout="wide")
 
@@ -140,6 +165,26 @@ st.markdown("""
       background: rgba(15,23,42,0.72); color: #cbd5e1; border-color: rgba(148,163,184,0.12);
     }
   }
+  .model-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  margin-left: 0.35rem;
+  font-size: 0.70rem;
+  letter-spacing: 0.03em;
+  text-transform: none;
+  background: rgba(148,163,184,0.18);
+  color: inherit;
+  vertical-align: middle;
+  word-break: break-all;
+}
+
+@media (prefers-color-scheme: dark) {
+  .model-chip {
+    background: rgba(148,163,184,0.16);
+  }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -153,19 +198,20 @@ def avatar_class(side: str) -> str:
     if side == "AGAINST": return "right"
     return "judge"
 
-def bubble_html(speaker, side, text="", typing=False):
+def bubble_html(speaker, side, model_name, text="", typing=False):
     sclass = side_class(side)
     aclass = avatar_class(side)
     align = "right" if side == "AGAINST" else "left"
     initial = speaker[0].upper()
     typing_cls = "typing" if typing else ""
     avatar = f'<div class="avatar {aclass}">{initial}</div>'
+    model_chip = f'<span class="model-chip">{model_name}</span>' if model_name else ''
     return f"""
     <div class="msg-row {align}">
       {avatar if align == 'left' else ''}
       <div class="bubble-wrap">
         <div class="bubble {sclass} {typing_cls}">
-          <div class="label">{speaker} · {side}</div>
+          <div class="label">{speaker} · {side} {model_chip}</div>
           <div>{text}</div>
         </div>
       </div>
@@ -180,7 +226,7 @@ def stream_worker(token_iter, token_queue, done_event):
     finally:
         done_event.set()
 
-def concurrent_stream_into_bubble(placeholder, speaker, side, token_iter, hints, hint_interval=1.1, poll_interval=0.04):
+def concurrent_stream_into_bubble(placeholder, speaker, side, model_name, token_iter, hints, hint_interval=1.1, poll_interval=0.04):
     token_queue = queue.Queue()
     done_event = threading.Event()
     worker = threading.Thread(target=stream_worker, args=(token_iter, token_queue, done_event), daemon=True)
@@ -200,14 +246,14 @@ def concurrent_stream_into_bubble(placeholder, speaker, side, token_iter, hints,
             except queue.Empty:
                 break
         if got_token or first_token_seen:
-            placeholder.markdown(bubble_html(speaker, side, full_text), unsafe_allow_html=True)
+            placeholder.markdown(bubble_html(speaker, side, model_name, full_text), unsafe_allow_html=True)
         else:
             current_time = time.time()
             if current_time - last_hint_switch >= hint_interval:
                 hint_index = (hint_index + 1) % len(hints)
                 last_hint_switch = current_time
             placeholder.markdown(
-                bubble_html(speaker, side, f"<span class='dots'>{hints[hint_index]}</span>", typing=True),
+                bubble_html(speaker, side, model_name, f"<span class='dots'>{hints[hint_index]}</span>", typing=True),
                 unsafe_allow_html=True,
             )
         if done_event.is_set() and token_queue.empty():
@@ -219,13 +265,15 @@ st.title("🎭 LLM Debate Arena")
 st.caption("Multi-agent debate between two LLM debaters and a judge, powered by OpenRouter")
 
 st.markdown('<div class="hero-shell">', unsafe_allow_html=True)
-meta_col1, meta_col2, meta_col3 = st.columns([1.2, 1.2, 2.6])
+meta_col1, meta_col2, meta_col3, meta_col4  = st.columns([1.2, 1.2, 1.2, 1.4])
 with meta_col1:
     st.markdown('<span class="meta-chip">⚡ Concurrent streaming</span>', unsafe_allow_html=True)
 with meta_col2:
-    st.markdown('<span class="meta-chip">🎯 Friendly demo</span>', unsafe_allow_html=True)
+    st.markdown('<span class="meta-chip">🎯 Friendly demo in sample mode</span>', unsafe_allow_html=True)
 with meta_col3:
-    st.markdown('<span class="meta-chip">💬 Real wait-time typing hints</span>', unsafe_allow_html=True)
+    st.markdown('<span class="meta-chip">✨ Auto-generate topics</span>', unsafe_allow_html=True)
+with meta_col4:
+    st.markdown('<span class="meta-chip">💬 Messaging-style typing hints</span>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
 with st.sidebar:
@@ -240,8 +288,7 @@ with st.sidebar:
     p2 = st.selectbox("Debater 2 (AGAINST)", [p for p in available_personas if p != p1])
     pj = st.selectbox("Judge", [p for p in available_personas if (p != p1) & (p != p2)])
     sample_mode = st.toggle("Sample mode (No API key needed)", value=True)
-    auto_topic = st.toggle("Auto-generate topic", value=True)
-    generate_topic_btn = st.button("✨ Generate topic", use_container_width=True)
+    generate_topic_btn = st.button("✨ Generate random topic", use_container_width=True)
     run = st.button("▶ Start debate", type="primary", use_container_width=True)
 
 if "generated_topic" not in st.session_state:
@@ -257,18 +304,22 @@ if st.session_state.topic_key != current_key:
 cfg_preview = DebateConfig(rounds=rounds, word_limit=word_limit, judge_limit=judge_limit, topic_domain=topic_domain)
 engine_preview = DebateEngine.from_env(cfg_preview)
 
-if generate_topic_btn:
-    st.session_state.generated_topic = engine_preview.generate_topic(topic_domain, p1, p2)
+if not st.session_state.generated_topic:
+    st.session_state.generated_topic = random.choice(TOPIC_BANK.get(topic_domain, ["Enter a debate topic."]))
 
-if auto_topic and not st.session_state.generated_topic:
-    try:
-        st.session_state.generated_topic = engine_preview.generate_topic(topic_domain, p1, p2)
-    except Exception:
-        st.session_state.generated_topic = ""
+if generate_topic_btn:
+    with st.status("✨ Generating a random topic for your choice of debaters...", expanded=True) as status:
+        st.write(f"Domain: {topic_domain}")
+        st.write(f"Debaters: {p1} vs {p2}")
+        try:
+            st.session_state.generated_topic = engine_preview.generate_topic(topic_domain, p1, p2)
+            status.update(label="✅ Topic ready! Feel free to edit it or start the debate directly.", state="complete", expanded=False)
+        except Exception:
+            status.update(label="⚠️ Automatic topic generation failed. Manually add a topic please.", state="error", expanded=False)
 
 topic = st.text_area(
     "Debate topic",
-    value=st.session_state.generated_topic or "Should AI replace human decision-making in critical domains like healthcare and justice?",
+    value=st.session_state.generated_topic,
     height=96,
     help="AI can generate a fresh topic under 50 words. You can still edit it.",
 )
@@ -301,13 +352,13 @@ if run:
         ]
         for i in range(rounds):
             p1_box = st.empty()
-            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", fake_stream(samples_for[i % len(samples_for)]), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
+            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", engine_preview.model_for, fake_stream(samples_for[i % len(samples_for)]), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
             transcript.append({"speaker": p1, "side": "FOR", "text": t1, "domain": topic_domain})
             p2_box = st.empty()
-            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", fake_stream(samples_against[i % len(samples_against)]), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
+            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine_preview.model_against, fake_stream(samples_against[i % len(samples_against)]), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
             transcript.append({"speaker": p2, "side": "AGAINST", "text": t2, "domain": topic_domain})
         judge_box = st.empty()
-        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", fake_stream(f"After a closely contested debate, {p2} argued more persuasively. The case against full replacement centered on accountability and the risk of scaling historical bias, which proved more compelling."), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
+        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine_preview.model_judge, fake_stream(f"After a closely contested debate, {p2} argued more persuasively. The case against full replacement centered on accountability and the risk of scaling historical bias, which proved more compelling."), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
     else:
         cfg = DebateConfig(rounds=rounds, word_limit=word_limit, judge_limit=judge_limit, topic_domain=topic_domain)
@@ -318,13 +369,13 @@ if run:
             st.stop()
         for i in range(rounds):
             p1_box = st.empty()
-            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", engine.generate_for_argument(topic, p1), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
+            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", engine.model_for, engine.generate_for_argument(topic, p1), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
             transcript.append({"speaker": p1, "side": "FOR", "text": t1, "domain": topic_domain})
             p2_box = st.empty()
-            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine.generate_against_argument(topic, p2, t1), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
+            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine.model_against, engine.generate_against_argument(topic, p2, t1), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
             transcript.append({"speaker": p2, "side": "AGAINST", "text": t2, "domain": topic_domain})
         judge_box = st.empty()
-        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine.generate_verdict(topic, pj, transcript), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
+        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine.model_judge, engine.generate_verdict(topic, pj, transcript), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
 
     st.markdown('</div>', unsafe_allow_html=True)
@@ -346,4 +397,4 @@ if run:
         "transcript": transcript,
         "verdict": verdict_text,
     }
-    st.download_button("⬇ Download transcript (JSON)", data=json.dumps(export, indent=2), file_name="debate.json", mime="application/json")
+    st.download_button("⬇️ Download transcript (JSON)", data=json.dumps(export, indent=2), file_name="debate.json", mime="application/json")
