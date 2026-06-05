@@ -165,6 +165,38 @@ st.markdown("""
       background: rgba(15,23,42,0.72); color: #cbd5e1; border-color: rgba(148,163,184,0.12);
     }
   }
+            
+  .rematch-banner {
+    margin-top: 1rem;
+    padding: 1rem 1.15rem;
+    border-radius: 1.1rem;
+    background: linear-gradient(180deg, rgba(255,247,214,0.96) 0%, rgba(255,239,179,0.96) 100%);
+    border: 1px solid rgba(202,138,4,0.28);
+    box-shadow: 0 14px 32px rgba(161,98,7,0.10);
+    color: #4b3a00;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1.45;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .rematch-banner {
+      background: linear-gradient(180deg, rgba(61,44,11,0.96) 0%, rgba(47,35,11,0.96) 100%);
+      border-color: rgba(250,204,21,0.22);
+      box-shadow: 0 14px 32px rgba(0,0,0,0.24);
+      color: #fde68a;
+    }
+  }
+
+  .rematch-spacer {
+    height: 0.85rem;
+  }
+
+  .bubble.verdict {
+    background: linear-gradient(180deg, #fff7d6 0%, #ffefb3 100%);
+    border: 1px solid rgba(202,138,4,0.35);
+  }
+               
   .model-chip {
   display: inline-flex;
   align-items: center;
@@ -198,19 +230,20 @@ def avatar_class(side: str) -> str:
     if side == "AGAINST": return "right"
     return "judge"
 
-def bubble_html(speaker, side, model_name, text="", typing=False):
+def bubble_html(speaker, side, model_name, text="", typing=False, verdict=False):
     sclass = side_class(side)
     aclass = avatar_class(side)
     align = "right" if side == "AGAINST" else "left"
     initial = speaker[0].upper()
     typing_cls = "typing" if typing else ""
+    verdict_cls = "verdict" if verdict else ""
     avatar = f'<div class="avatar {aclass}">{initial}</div>'
     model_chip = f'<span class="model-chip">{model_name}</span>' if model_name else ''
     return f"""
     <div class="msg-row {align}">
       {avatar if align == 'left' else ''}
       <div class="bubble-wrap">
-        <div class="bubble {sclass} {typing_cls}">
+        <div class="bubble {sclass} {typing_cls} {verdict_cls}">
           <div class="label">{speaker} · {side} {model_chip}</div>
           <div>{text}</div>
         </div>
@@ -282,7 +315,7 @@ with st.sidebar:
     word_limit = st.slider("Debater word limit", 50, 200, 50, step=25)
     judge_limit = st.slider("Judge word limit", 50, 250, 100, step=25)
     hint_interval = DEFAULT_HINT_INTERVAL
-    topic_domain = st.selectbox("Domain", list(PERSONA_GROUPS.keys()))
+    topic_domain = st.selectbox("📌Domain", list(PERSONA_GROUPS.keys()))
     available_personas = get_personas_for_group(topic_domain)
     p1 = st.selectbox("Debater 1 (FOR)", available_personas)
     p2 = st.selectbox("Debater 2 (AGAINST)", [p for p in available_personas if p != p1])
@@ -300,6 +333,17 @@ current_key = f"{topic_domain}|{p1}|{p2}"
 if st.session_state.topic_key != current_key:
     st.session_state.topic_key = current_key
     st.session_state.generated_topic = ""
+    st.session_state.debate_complete = False
+    st.session_state.rematch_mode = False
+    st.session_state.verdict = ""
+
+if "debate_complete" not in st.session_state:
+    st.session_state.debate_complete = False
+if "rematch_mode" not in st.session_state:
+  
+    st.session_state.rematch_mode = False
+if "verdict" not in st.session_state:
+    st.session_state.verdict = ""
 
 cfg_preview = DebateConfig(rounds=rounds, word_limit=word_limit, judge_limit=judge_limit, topic_domain=topic_domain)
 engine_preview = DebateEngine.from_env(cfg_preview)
@@ -317,12 +361,19 @@ if generate_topic_btn:
         except Exception:
             status.update(label="⚠️ Automatic topic generation failed. Manually add a topic please.", state="error", expanded=False)
 
+if st.session_state.rematch_mode:
+    st.info(f"Rematch mode: {p1} vs {p2}. Enter a new topic to continue.")
+
 topic = st.text_area(
     "Debate topic",
     value=st.session_state.generated_topic,
     height=96,
     help="AI can generate a fresh topic under 50 words. You can still edit it.",
 )
+
+verdict_text = ""
+judge_model = ""
+transcript = []
 
 if run:
     if not topic.strip():
@@ -381,14 +432,40 @@ if run:
         verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine.model_judge, engine.generate_verdict(topic, pj, transcript), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(
+    bubble_html(pj, "JUDGE", judge_model, verdict_text, verdict=False),
+    unsafe_allow_html=True,
+    )
 
-    st.markdown(f"""
-    <div class="verdict-box">
-      <div class="verdict-title">⚖️ Judge's Verdict · {pj} · {judge_model}</div>
-      <div>{verdict_text}</div>
-    </div>
-    """, unsafe_allow_html=True)
+    p1_short = p1.split(" - ")[0]
+    p2_short = p2.split(" - ")[0]
+    verdict_lower = verdict_text.lower()
+    p1_favoured = p1_short.lower() in verdict_lower[:250] or "for" in verdict_lower[:120]
+    loser = p2_short if p1_favoured else p1_short
+
+    st.markdown(
+        f"""
+        <div class="rematch-banner">
+          🔥 The crowd isn't satisfied. <strong>{loser}</strong> demands a rematch on a new topic.
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="rematch-spacer"></div>', unsafe_allow_html=True)
+
+    c1, c2 = st.columns(2, gap="medium")
+    with c1:
+        if st.button("⚔️ Accept the Rematch", use_container_width=True):
+            st.session_state.rematch_mode = True
+            st.session_state.generated_topic = ""
+            st.session_state.topic_key = f"{topic_domain}|{p1}|{p2}|rematch"
+            st.rerun()
+
+    with c2:
+        if st.button("🏟️ Change the Arena", use_container_width=True):
+            for k in ["debate_complete", "rematch_mode", "generated_topic", "topic_key", "verdict"]:
+                st.session_state.pop(k, None)
+            st.rerun()    
 
     st.markdown("<div style='height: 16px;'></div>", unsafe_allow_html=True)
 
