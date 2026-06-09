@@ -13,7 +13,7 @@ This project simulates a structured debate between two LLM-powered agents:
 - **Debater 2 (AGAINST)** argues against the topic.
 - **Judge** reviews the transcript and produces a final verdict.
 
-The application is designed to feel like a polished chat product rather than a raw model wrapper. It includes side-aware chat bubbles, persona labels, domain-scoped historical personas, AI-assisted topic generation, full-topic visibility, transcript export, sample mode, and concurrent typing hints that run while the real model request is already in progress.
+The application is designed to feel like a polished chat product rather than a raw model wrapper. It includes side-aware chat bubbles, persona labels, domain-scoped historical personas, AI-assisted topic generation, full-topic visibility, transcript export, sample mode, concurrent typing hints that run while the real model request is already in progress, a post-verdict rematch flow, and a unified visual theme across all UI states.
 
 ## Why this project matters
 
@@ -38,6 +38,9 @@ This repo is meant to showcase practical AI application engineering, not just AP
 - Word limit sliders in increments of 25.
 - Downloadable JSON transcript with domain metadata.
 - Sample mode for running the app without API credentials.
+- Post-verdict rematch banner identifying the losing debater.
+- **Accept the Rematch** and **Change the Arena** buttons rendered immediately after the verdict.
+- Unified color theme across all UI states (typing, rendered, verdict, banner, buttons).
 - Ready for deployment on Streamlit Community Cloud.
 
 ## Architecture
@@ -51,7 +54,8 @@ flowchart TD
     D -- Yes --> B
     D -- No --> E[Judge reviews transcript]
     E --> F[Verdict displayed in UI]
-    F --> G[Transcript export as JSON]
+    F --> G[Rematch banner + Accept/Change buttons]
+    G --> H[Transcript export as JSON]
 ```
 
 ## Application flow
@@ -63,7 +67,9 @@ flowchart TD
 5. The exchange repeats for the configured number of rounds.
 6. The judge reviews the full transcript.
 7. The verdict is rendered in the UI.
-8. The user can download the transcript as JSON (including domain metadata).
+8. A rematch banner immediately follows the verdict, naming the losing debater.
+9. The user may accept a rematch on a new topic or reset to choose a new arena.
+10. The user can download the transcript as JSON (including domain metadata).
 
 ## Concurrency model
 
@@ -80,6 +86,33 @@ The app now:
 - replaces the hint bubble with the real streamed response as soon as tokens arrive.
 
 This provides a more natural chat experience and avoids unnecessary pre-call waiting.
+
+## Visual theme
+
+All UI elements share a single consistent color palette:
+
+| Element | Color family |
+|---------|-------------|
+| FOR debater bubble | Teal |
+| AGAINST debater bubble | Blue |
+| Judge / verdict bubble | Gold |
+| Rematch banner | Gold |
+| Accept the Rematch button | Gold (primary) |
+| Change the Arena button | Slate (neutral) |
+| Typing state | Same family, reduced opacity |
+
+CSS variables (`--for`, `--against`, `--judge`) drive all states. Typing no longer uses a separate unrelated color; it uses the same family with lowered opacity and italic style.
+
+## Post-verdict rematch flow
+
+After the judge delivers the verdict:
+
+1. The loser is identified by parsing the verdict text immediately as streaming completes and stored in `st.session_state.loser`.
+2. A gold rematch banner renders without delay, naming the losing debater.
+3. Two buttons follow:
+   - **Accept the Rematch** — keeps the same debaters and prompts for a new topic.
+   - **Change the Arena** — resets all state so the user can start fresh.
+4. Session state keys `debate_complete`, `rematch_mode`, `verdict`, and `loser` persist across reruns so the banner and buttons remain visible after Streamlit rerenders.
 
 ## Tech stack
 
@@ -138,6 +171,12 @@ A portfolio app should still be demonstrable without paid credentials. Sample mo
 
 ### 6. Environment-driven configuration
 Secrets and model config are separated from source code to support safe local development and cloud deployment.
+
+### 7. Loser detection without extra latency
+The loser is determined by a lightweight substring check on the verdict text immediately after streaming completes. The result is stored in `st.session_state.loser` before any UI is rendered, so the rematch banner appears without a visible pause between the verdict and the banner.
+
+### 8. Rematch state persistence
+Four session state keys (`debate_complete`, `rematch_mode`, `verdict`, `loser`) ensure the post-verdict UI survives Streamlit reruns. They are only cleared when the user explicitly clicks **Change the Arena**.
 
 ## Local setup
 
@@ -221,6 +260,7 @@ OPENROUTER_MODEL_JUDGE = "moonshotai/kimi-k2.6:free"
 - Showcasing a deployable AI product on GitHub and Streamlit Cloud.
 - Experimenting with prompt design for opposing viewpoints and evaluation.
 - Using transcript export for later analysis or improvement.
+- Triggering a rematch between the same debaters on a new topic after the verdict.
 
 ## Limitations
 
@@ -229,6 +269,7 @@ OPENROUTER_MODEL_JUDGE = "moonshotai/kimi-k2.6:free"
 - The judge is still another LLM, not a ground-truth evaluator.
 - Long debates may increase latency and token costs.
 - UI persistence is session-based; transcripts are not stored server-side.
+- Loser detection uses a lightweight heuristic and may misidentify the loser on ambiguous verdicts.
 - Streamlit layout customization has some limitations compared to full frontend frameworks.
 
 ## Future improvements
@@ -239,12 +280,14 @@ OPENROUTER_MODEL_JUDGE = "moonshotai/kimi-k2.6:free"
 - Add analytics on argument strength and rebuttal quality.
 - Add optional moderation or toxicity filters.
 - Add evaluation metrics and benchmark topics.
+- Improve loser detection with structured verdict output from the judge model.
 
 ## Screenshots
 
 ![Debate UI](assets/debate-ui.png)
 
 ![Judge Verdict](assets/judge-verdict.png)
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
