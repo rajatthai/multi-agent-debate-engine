@@ -6,6 +6,12 @@ import threading
 import random
 import streamlit as st
 from debate_arena.engine import DebateEngine, DebateConfig
+from debate_arena.models import (
+    default_model_ids,
+    fetch_free_text_models,
+    model_name_map,
+    resolve_default_index,
+)
 from debate_arena.personas import PERSONA_GROUPS, get_personas_for_group
 
 TOPIC_BANK = {
@@ -217,6 +223,25 @@ st.markdown("""
     background: rgba(148,163,184,0.16);
   }
 }
+
+
+div[data-testid="stVerticalBlockBorderWrapper"]:has(.main-card-marker) {
+  background: rgba(255, 255, 255, 0.62) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+  border: 1px solid rgba(148, 163, 184, 0.16) !important;
+  border-radius: 1.5rem !important;
+  padding: 1.25rem 1.5rem 1.5rem 1.5rem !important;
+  box-shadow: 0 20px 50px rgba(15, 23, 42, 0.08) !important;
+  margin-bottom: 1.25rem;
+}
+@media (prefers-color-scheme: dark) {
+  div[data-testid="stVerticalBlockBorderWrapper"]:has(.main-card-marker) {
+    background: rgba(15, 23, 42, 0.62) !important;
+    border: 1px solid rgba(148, 163, 184, 0.14) !important;
+    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.38) !important;
+  }
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -239,18 +264,16 @@ def bubble_html(speaker, side, model_name, text="", typing=False, verdict=False)
     verdict_cls = "verdict" if verdict else ""
     avatar = f'<div class="avatar {aclass}">{initial}</div>'
     model_chip = f'<span class="model-chip">{model_name}</span>' if model_name else ''
-    return f"""
-    <div class="msg-row {align}">
-      {avatar if align == 'left' else ''}
-      <div class="bubble-wrap">
-        <div class="bubble {sclass} {typing_cls} {verdict_cls}">
-          <div class="label">{speaker} · {side} {model_chip}</div>
-          <div>{text}</div>
-        </div>
-      </div>
-      {avatar if align == 'right' else ''}
-    </div>
-    """
+    return f'<div class="msg-row {align}">' \
+           f'{avatar if align == "left" else ""}' \
+           f'<div class="bubble-wrap">' \
+           f'<div class="bubble {sclass} {typing_cls} {verdict_cls}">' \
+           f'<div class="label">{speaker} · {side} {model_chip}</div>' \
+           f'<div>{text}</div>' \
+           f'</div>' \
+           f'</div>' \
+           f'{avatar if align == "right" else ""}' \
+           f'</div>'
 
 def stream_worker(token_iter, token_queue, done_event):
     try:
@@ -309,47 +332,132 @@ with meta_col4:
     st.markdown('<span class="meta-chip">💬 Messaging-style typing hints</span>', unsafe_allow_html=True)
 st.markdown('</div>', unsafe_allow_html=True)
 
-with st.sidebar:
-    st.header("⚙️ Settings")
-    rounds = st.slider("Rounds", 1, 5, 2, step=1)
-    word_limit = st.slider("Debater word limit", 50, 200, 50, step=25)
-    judge_limit = st.slider("Judge word limit", 50, 250, 100, step=25)
+# Setup/fetch models silently
+if "free_models" not in st.session_state:
+    models, fetch_error = fetch_free_text_models()
+    st.session_state.free_models = models
+    st.session_state.models_fetch_error = fetch_error
+
+free_models = st.session_state.free_models
+model_ids = [model.id for model in free_models]
+model_labels = model_name_map(free_models)
+env_defaults = default_model_ids()
+
+# Unified main-content card containing settings, selectors, topic, and actions
+with st.container(border=True):
+    st.markdown('<div class="main-card-marker"></div>', unsafe_allow_html=True)
+    
+    # Row 1: Sliders & Domain
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        rounds = st.slider("Rounds", 1, 5, 2, step=1)
+        topic_domain = st.selectbox("📌 Domain", list(PERSONA_GROUPS.keys()))
+    with col2:
+        word_limit = st.slider("Debater words", 50, 200, 50, step=25)
+    with col3:
+        judge_limit = st.slider("Judge words", 50, 250, 100, step=25)
+        
     hint_interval = DEFAULT_HINT_INTERVAL
-    topic_domain = st.selectbox("📌Domain", list(PERSONA_GROUPS.keys()))
     available_personas = get_personas_for_group(topic_domain)
-    p1 = st.selectbox("Debater 1 (FOR)", available_personas)
-    p2 = st.selectbox("Debater 2 (AGAINST)", [p for p in available_personas if p != p1])
-    pj = st.selectbox("Judge", [p for p in available_personas if (p != p1) & (p != p2)])
-    sample_mode = st.toggle("Sample mode (No API key needed)", value=True)
-    generate_topic_btn = st.button("✨ Generate random topic", use_container_width=True)
-    run = st.button("▶ Start debate", type="primary", use_container_width=True)
 
-if "generated_topic" not in st.session_state:
-    st.session_state.generated_topic = ""
-if "topic_key" not in st.session_state:
-    st.session_state.topic_key = ""
+    # Row 2: FOR, AGAINST, JUDGE selectors
+    c1, c2, c3 = st.columns(3, gap="large")
+    with c1:
+        st.markdown('<div style="color: #0f766e; font-weight: 800; font-size: 1.05rem; letter-spacing: 0.05em; margin-bottom: 0.5rem;">🟢 FOR</div>', unsafe_allow_html=True)
+        p1 = st.selectbox("Persona", available_personas, key="persona_for")
+        model_for = st.selectbox(
+            "Agent",
+            model_ids,
+            index=resolve_default_index(free_models, env_defaults["for"]),
+            format_func=lambda model_id: model_labels[model_id],
+            key="agent_for",
+        )
+    with c2:
+        st.markdown('<div style="color: #1d4ed8; font-weight: 800; font-size: 1.05rem; letter-spacing: 0.05em; margin-bottom: 0.5rem;">🔵 AGAINST</div>', unsafe_allow_html=True)
+        p2 = st.selectbox(
+            "Persona",
+            [p for p in available_personas if p != p1],
+            key="persona_against",
+        )
+        model_against = st.selectbox(
+            "Agent",
+            model_ids,
+            index=resolve_default_index(free_models, env_defaults["against"]),
+            format_func=lambda model_id: model_labels[model_id],
+            key="agent_against",
+        )
+    with c3:
+        st.markdown('<div style="color: #a16207; font-weight: 800; font-size: 1.05rem; letter-spacing: 0.05em; margin-bottom: 0.5rem;">👑 JUDGE</div>', unsafe_allow_html=True)
+        pj = st.selectbox(
+            "Persona",
+            [p for p in available_personas if (p != p1) & (p != p2)],
+            key="persona_judge",
+        )
+        model_judge = st.selectbox(
+            "Agent",
+            model_ids,
+            index=resolve_default_index(free_models, env_defaults["judge"]),
+            format_func=lambda model_id: model_labels[model_id],
+            key="agent_judge",
+        )
 
-current_key = f"{topic_domain}|{p1}|{p2}"
-if st.session_state.topic_key != current_key:
-    st.session_state.topic_key = current_key
-    st.session_state.generated_topic = ""
-    st.session_state.debate_complete = False
-    st.session_state.rematch_mode = False
-    st.session_state.verdict = ""
+    # Row 3: Debate topic setup
+    if "generated_topic" not in st.session_state:
+        st.session_state.generated_topic = ""
+    if "topic_key" not in st.session_state:
+        st.session_state.topic_key = ""
 
-if "debate_complete" not in st.session_state:
-    st.session_state.debate_complete = False
-if "rematch_mode" not in st.session_state:
-  
-    st.session_state.rematch_mode = False
-if "verdict" not in st.session_state:
-    st.session_state.verdict = ""
+    current_key = f"{topic_domain}|{p1}|{p2}"
+    if st.session_state.topic_key != current_key:
+        st.session_state.topic_key = current_key
+        st.session_state.generated_topic = ""
+        st.session_state.debate_complete = False
+        st.session_state.rematch_mode = False
+        st.session_state.verdict = ""
 
-cfg_preview = DebateConfig(rounds=rounds, word_limit=word_limit, judge_limit=judge_limit, topic_domain=topic_domain)
-engine_preview = DebateEngine.from_env(cfg_preview)
+    if "debate_complete" not in st.session_state:
+        st.session_state.debate_complete = False
+    if "rematch_mode" not in st.session_state:
+        st.session_state.rematch_mode = False
+    if "verdict" not in st.session_state:
+        st.session_state.verdict = ""
 
-if not st.session_state.generated_topic:
-    st.session_state.generated_topic = random.choice(TOPIC_BANK.get(topic_domain, ["Enter a debate topic."]))
+    cfg_preview = DebateConfig(rounds=rounds, word_limit=word_limit, judge_limit=judge_limit, topic_domain=topic_domain)
+    engine_preview = DebateEngine.from_env(
+        cfg_preview,
+        model_for=model_for,
+        model_against=model_against,
+        model_judge=model_judge,
+    )
+
+    if not st.session_state.generated_topic:
+        st.session_state.generated_topic = random.choice(TOPIC_BANK.get(topic_domain, ["Enter a debate topic."]))
+
+    if st.session_state.rematch_mode:
+        st.info(f"Rematch mode: {p1} vs {p2}. Enter a new topic to continue.")
+
+    topic = st.text_area(
+        "Debate topic",
+        value=st.session_state.generated_topic,
+        height=96,
+        help="AI can generate a fresh topic under 50 words. You can still edit it.",
+    )
+
+    # Row 4: Action elements
+    b1, b2, b3 = st.columns(3)
+    with b1:
+        sample_mode = st.toggle("Sample mode (No API key needed)", value=True)
+    with b2:
+        generate_topic_btn = st.button("✨ Generate random topic", use_container_width=True)
+    with b3:
+        run = st.button("▶ Start debate", type="primary", use_container_width=True)
+
+# Display warnings below the main-card container and outside it
+if st.session_state.models_fetch_error:
+    st.warning(
+        "Could not load the OpenRouter free model list. "
+        "Using .env defaults until you refresh the page."
+    )
 
 if generate_topic_btn:
     with st.status("✨ Generating a random topic for your choice of debaters...", expanded=True) as status:
@@ -360,16 +468,9 @@ if generate_topic_btn:
             status.update(label="✅ Topic ready! Feel free to edit it or start the debate directly.", state="complete", expanded=False)
         except Exception:
             status.update(label="⚠️ Automatic topic generation failed. Manually add a topic please.", state="error", expanded=False)
+    st.rerun()
 
-if st.session_state.rematch_mode:
-    st.info(f"Rematch mode: {p1} vs {p2}. Enter a new topic to continue.")
 
-topic = st.text_area(
-    "Debate topic",
-    value=st.session_state.generated_topic,
-    height=96,
-    help="AI can generate a fresh topic under 50 words. You can still edit it.",
-)
 
 verdict_text = ""
 judge_model = ""
@@ -404,32 +505,37 @@ if run:
         ]
         for i in range(rounds):
             p1_box = st.empty()
-            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", engine_preview.model_for, fake_stream(samples_for[i % len(samples_for)]), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
+            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", model_for, fake_stream(samples_for[i % len(samples_for)]), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
             transcript.append({"speaker": p1, "side": "FOR", "text": t1, "domain": topic_domain})
             p2_box = st.empty()
-            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine_preview.model_against, fake_stream(samples_against[i % len(samples_against)]), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
+            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", model_against, fake_stream(samples_against[i % len(samples_against)]), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
             transcript.append({"speaker": p2, "side": "AGAINST", "text": t2, "domain": topic_domain})
         judge_box = st.empty()
-        judge_model = engine_preview.model_judge
-        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine_preview.model_judge, fake_stream(f"After a closely contested debate, {p2} argued more persuasively. The case against full replacement centered on accountability and the risk of scaling historical bias, which proved more compelling."), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
+        judge_model = model_judge
+        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", model_judge, fake_stream(f"After a closely contested debate, {p2} argued more persuasively. The case against full replacement centered on accountability and the risk of scaling historical bias, which proved more compelling."), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
     else:
         cfg = DebateConfig(rounds=rounds, word_limit=word_limit, judge_limit=judge_limit, topic_domain=topic_domain)
-        engine = DebateEngine.from_env(cfg)
+        engine = DebateEngine.from_env(
+            cfg,
+            model_for=model_for,
+            model_against=model_against,
+            model_judge=model_judge,
+        )
         if not engine.api_key:
             st.error("OPENROUTER_API_KEY not set. Enable Sample mode or add your API key.")
             st.markdown('</div>', unsafe_allow_html=True)
             st.stop()
         for i in range(rounds):
             p1_box = st.empty()
-            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", engine.model_for, engine.generate_for_argument(topic, p1), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
+            t1 = concurrent_stream_into_bubble(p1_box, p1, "FOR", model_for, engine.generate_for_argument(topic, p1), [f"{p1} is reasoning", f"{p1} is revising"], hint_interval=hint_interval)
             transcript.append({"speaker": p1, "side": "FOR", "text": t1, "domain": topic_domain})
             p2_box = st.empty()
-            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", engine.model_against, engine.generate_against_argument(topic, p2, t1), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
+            t2 = concurrent_stream_into_bubble(p2_box, p2, "AGAINST", model_against, engine.generate_against_argument(topic, p2, t1), [f"{p2} is reasoning", f"{p2} is preparing a counter-argument"], hint_interval=hint_interval)
             transcript.append({"speaker": p2, "side": "AGAINST", "text": t2, "domain": topic_domain})
         judge_box = st.empty()
-        judge_model = engine.model_judge
-        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", engine.model_judge, engine.generate_verdict(topic, pj, transcript), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
+        judge_model = model_judge
+        verdict_text = concurrent_stream_into_bubble(judge_box, pj, "JUDGE", model_judge, engine.generate_verdict(topic, pj, transcript), [f"{pj} is reviewing both sides", f"{pj} is drafting the verdict"], hint_interval=hint_interval)
         judge_box.empty()
 
     st.markdown(
@@ -475,6 +581,9 @@ if run:
         "debater_for": p1,
         "debater_against": p2,
         "judge": pj,
+        "model_for": model_for,
+        "model_against": model_against,
+        "model_judge": model_judge,
         "transcript": transcript,
         "verdict": verdict_text,
     }

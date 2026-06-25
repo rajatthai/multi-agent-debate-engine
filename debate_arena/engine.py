@@ -29,13 +29,21 @@ class DebateEngine:
         self.config = config
 
     @classmethod
-    def from_env(cls, config: DebateConfig):
+    def from_env(
+        cls,
+        config: DebateConfig,
+        model_for: str | None = None,
+        model_against: str | None = None,
+        model_judge: str | None = None,
+    ):
+        from .models import default_model_against, default_model_for, default_model_judge
+
         return cls(
             api_key=os.getenv("OPENROUTER_API_KEY", ""),
             api_url=os.getenv("OPENROUTER_API_URL", "https://openrouter.ai/api/v1/chat/completions"),
-            model_for=os.getenv("OPENROUTER_MODEL_DEBATER_1", "nvidia/nemotron-3-nano-30b-a3b:free"),
-            model_against=os.getenv("OPENROUTER_MODEL_DEBATER_2", "nvidia/nemotron-3-super-120b-a12b:free"),
-            model_judge=os.getenv("OPENROUTER_MODEL_JUDGE", "moonshotai/kimi-k2.6:free"),
+            model_for=model_for or default_model_for(),
+            model_against=model_against or default_model_against(),
+            model_judge=model_judge or default_model_judge(),
             config=config,
         )
 

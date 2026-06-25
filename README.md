@@ -36,8 +36,10 @@ This repo is meant to showcase practical AI application engineering, not just AP
 - Concurrent typing hints while the model request is already running.
 - Adjustable rounds and word limits.
 - Word limit sliders in increments of 25.
+- Per-role OpenRouter model pickers (**Agent For**, **Agent Against**, **Agent Judge**) populated from the live free-tier text model list.
+- `.env` model values remain the preset defaults for each role.
 - Downloadable JSON transcript with domain metadata.
-- Sample mode for running the app without API credentials.
+- Sample mode for running the app without API credentials; model dropdowns still update chat model chips while debate content remains simulated.
 - Post-verdict rematch banner identifying the losing debater.
 - **Accept the Rematch** and **Change the Arena** buttons rendered immediately after the verdict.
 - Unified color theme across all UI states (typing, rendered, verdict, banner, buttons).
@@ -61,15 +63,16 @@ flowchart TD
 ## Application flow
 
 1. User selects a domain and three distinct personas (FOR debater, AGAINST debater, judge).
-2. User enters a debate topic or generates one tailored to the domain and selected debaters.
-3. The FOR debater produces the opening argument.
-4. The AGAINST debater responds to the topic and prior argument.
-5. The exchange repeats for the configured number of rounds.
-6. The judge reviews the full transcript.
-7. The verdict is rendered in the UI.
-8. A rematch banner immediately follows the verdict, naming the losing debater.
-9. The user may accept a rematch on a new topic or reset to choose a new arena.
-10. The user can download the transcript as JSON (including domain metadata).
+2. User selects an OpenRouter free text model for each role (defaults come from `.env`).
+3. User enters a debate topic or generates one tailored to the domain and selected debaters.
+4. The FOR debater produces the opening argument.
+5. The AGAINST debater responds to the topic and prior argument.
+6. The exchange repeats for the configured number of rounds.
+7. The judge reviews the full transcript.
+8. The verdict is rendered in the UI.
+9. A rematch banner immediately follows the verdict, naming the losing debater.
+10. The user may accept a rematch on a new topic or reset to choose a new arena.
+11. The user can download the transcript as JSON (including domain metadata and selected models).
 
 ## Concurrency model
 
@@ -144,6 +147,7 @@ After the judge delivers the verdict:
 ├── debate_arena/
 │   ├── __init__.py
 │   ├── engine.py
+│   ├── models.py
 │   └── personas.py
 ├── demo/
 │   └── example_debate.json
@@ -170,12 +174,15 @@ Typing hints are not fake front-loaded delays anymore. They now run while the AP
 A portfolio app should still be demonstrable without paid credentials. Sample mode allows visitors and recruiters to experience the UI without needing an API key.
 
 ### 6. Environment-driven configuration
-Secrets and model config are separated from source code to support safe local development and cloud deployment.
+Secrets and model config are separated from source code to support safe local development and cloud deployment. The three `OPENROUTER_MODEL_*` values act as preset defaults in the UI; users can override them per role from the sidebar dropdowns.
 
-### 7. Loser detection without extra latency
+### 7. Live free-model discovery
+On each session load, the app fetches OpenRouter's free text models once from `https://openrouter.ai/api/v1/models` (`min_price=0`, `max_price=0`, text input/output only) and reuses that list for all three agent dropdowns. If the fetch fails, the UI falls back to the `.env` defaults and shows a sidebar warning until the page is refreshed.
+
+### 8. Loser detection without extra latency
 The loser is determined by a lightweight substring check on the verdict text immediately after streaming completes. The result is stored in `st.session_state.loser` before any UI is rendered, so the rematch banner appears without a visible pause between the verdict and the banner.
 
-### 8. Rematch state persistence
+### 9. Rematch state persistence
 Four session state keys (`debate_complete`, `rematch_mode`, `verdict`, `loser`) ensure the post-verdict UI survives Streamlit reruns. They are only cleared when the user explicitly clicks **Change the Arena**.
 
 ## Local setup
@@ -221,6 +228,8 @@ OPENROUTER_MODEL_DEBATER_2=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_MODEL_JUDGE=moonshotai/kimi-k2.6:free
 ```
 
+The three `OPENROUTER_MODEL_*` values are preset defaults for **Agent For**, **Agent Against**, and **Agent Judge** in the sidebar. At runtime, the dropdowns are populated from OpenRouter's live free text model list; if a default is no longer available, the first model from that list is selected instead.
+
 ### 5. Run the app
 
 ```bash
@@ -264,12 +273,13 @@ OPENROUTER_MODEL_JUDGE = "moonshotai/kimi-k2.6:free"
 
 ## Limitations
 
-- Auto-generated topics require a live API key; sample mode uses a static fallback topic instead.
+- Auto-generated topics require a live API key; sample mode uses a static fallback topic instead. Topic generation uses the selected **Agent For** model.
 - Verdict quality depends heavily on model quality and prompting.
 - The judge is still another LLM, not a ground-truth evaluator.
 - Long debates may increase latency and token costs.
 - UI persistence is session-based; transcripts are not stored server-side.
 - Loser detection uses a lightweight heuristic and may misidentify the loser on ambiguous verdicts.
+- Free model availability depends on OpenRouter; preset `.env` defaults may occasionally be absent from the live list.
 - Streamlit layout customization has some limitations compared to full frontend frameworks.
 
 ## Future improvements
