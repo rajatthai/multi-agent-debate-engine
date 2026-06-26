@@ -27,6 +27,7 @@ This repo is meant to showcase practical AI application engineering, not just AP
 
 ## Features
 
+- **Unified Configuration Card**: All settings (Rounds, word limits), domain and persona selectors, topic fields, and action buttons are consolidated into a single glassmorphic card on the main page, removing the sidebar entirely.
 - Domain picker with grouped personas across Philosophy, Politics, Economics, Technology, and Science.
 - Persona profiles that shape each debater's expertise and rhetorical style within the selected domain.
 - Debate topic input with large, always-visible topic area, plus auto-generation and a manual **Generate topic** control.
@@ -174,10 +175,10 @@ Typing hints are not fake front-loaded delays anymore. They now run while the AP
 A portfolio app should still be demonstrable without paid credentials. Sample mode allows visitors and recruiters to experience the UI without needing an API key.
 
 ### 6. Environment-driven configuration
-Secrets and model config are separated from source code to support safe local development and cloud deployment. The three `OPENROUTER_MODEL_*` values act as preset defaults in the UI; users can override them per role from the sidebar dropdowns.
+Secrets and model config are separated from source code to support safe local development and cloud deployment. The three `OPENROUTER_MODEL_*` values act as preset defaults in the UI; users can override them per role from the main-card dropdowns.
 
 ### 7. Live free-model discovery
-On each session load, the app fetches OpenRouter's free text models once from `https://openrouter.ai/api/v1/models` (`min_price=0`, `max_price=0`, text input/output only) and reuses that list for all three agent dropdowns. If the fetch fails, the UI falls back to the `.env` defaults and shows a sidebar warning until the page is refreshed.
+On each session load, the app fetches OpenRouter's free text models once from `https://openrouter.ai/api/v1/models` (`min_price=0`, `max_price=0`, text input/output only) and reuses that list for all three agent dropdowns. If the fetch fails, the UI falls back to the `.env` defaults and shows a warning below the main card until the page is refreshed.
 
 ### 8. Loser detection without extra latency
 The loser is determined by a lightweight substring check on the verdict text immediately after streaming completes. The result is stored in `st.session_state.loser` before any UI is rendered, so the rematch banner appears without a visible pause between the verdict and the banner.
@@ -228,7 +229,7 @@ OPENROUTER_MODEL_DEBATER_2=nvidia/nemotron-3-super-120b-a12b:free
 OPENROUTER_MODEL_JUDGE=moonshotai/kimi-k2.6:free
 ```
 
-The three `OPENROUTER_MODEL_*` values are preset defaults for **Agent For**, **Agent Against**, and **Agent Judge** in the sidebar. At runtime, the dropdowns are populated from OpenRouter's live free text model list; if a default is no longer available, the first model from that list is selected instead.
+The three `OPENROUTER_MODEL_*` values are preset defaults for **Agent For**, **Agent Against**, and **Agent Judge** in the main-card selectors. At runtime, the dropdowns are populated from OpenRouter's live free text model list; if a default is no longer available, the first model from that list is selected instead.
 
 ### 5. Run the app
 
